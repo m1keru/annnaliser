@@ -1,6 +1,6 @@
 # tool marcros
 CC := go
-CCFLAG :=
+CCFLAG := 
 
 # path marcros
 BIN_PATH := dist

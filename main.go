@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 func readGzFile(filename string, logDir *string) ([]string, error) {
@@ -36,7 +37,6 @@ func readGzFile(filename string, logDir *string) ([]string, error) {
 }
 
 func updateCountsPaths(path string, result *map[string]uint64) {
-	fmt.Println(path)
 	subs := strings.Split(path, "/")
 	var tmpPath string
 	for _, sub := range subs {
@@ -57,7 +57,6 @@ func stripLines(content *[]string) []string {
 		result := regex.FindStringSubmatch(line)
 		for i := range result {
 			if subs[i] == "path" {
-				//fmt.Println(result[i])
 				stripped = append(stripped, result[i])
 			}
 		}
@@ -65,25 +64,23 @@ func stripLines(content *[]string) []string {
 	return stripped
 }
 
-func process(file os.FileInfo, resultmap *map[string]uint64, logDir *string, resp *chan string) {
-	*resp <- file.Name()
+func process(file os.FileInfo, resultmap *map[string]uint64, logDir *string, wg *sync.WaitGroup) {
 	content, e := readGzFile(file.Name(), logDir)
 	if e != nil {
 		fmt.Printf("cannot read %s, err: %s", file.Name(), e)
 	}
-	//fmt.Printf("%s size:%d\n", file.Name(), len(content))
 	stripped := stripLines(&content)
 	for _, i := range stripped {
-		//fmt.Println("range " + i)
 		updateCountsPaths(i, resultmap)
 	}
-	<-*resp
+	wg.Done()
+	return
 }
 
 func main() {
 	var gzLogs, plainLogs []os.FileInfo
-	var results = make(chan string, 2)
 	var resultmap = make(map[string]uint64)
+	var wg sync.WaitGroup
 	var logDir = flag.String("dir", "/var/log/hadoop-hdfs/", "hdfs audit directory")
 	flag.Parse()
 	files, e := ioutil.ReadDir(*logDir)
@@ -101,13 +98,11 @@ func main() {
 		}
 	}
 
+	wg.Add(len(gzLogs))
 	for _, file := range gzLogs {
-		fmt.Println(file.Name())
-		go process(file, &resultmap, logDir, &results)
+		go process(file, &resultmap, logDir, &wg)
 	}
-
-	fmt.Println(<-results)
-	close(results)
+	wg.Wait()
 	fmt.Println("resultmap: ", len(resultmap))
 	for key, val := range resultmap {
 		fmt.Println("path: ", key, " count:", val)
